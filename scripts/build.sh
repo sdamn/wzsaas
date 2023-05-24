@@ -44,14 +44,15 @@ declare -A MERGED_PARTITION=(["zsystem"]="$ROOT_MNT" ["vendor"]="$VENDOR_MNT" ["
 DOWNLOAD_DIR=../download
 DOWNLOAD_CONF_NAME=download.list
 PYTHON_VENV_DIR="$(dirname "$PWD")/python3-env"
+EROFS_USE_FUSE=1
 umount_clean() {
     if [ -d "$ROOT_MNT" ] || [ -d "$ROOT_MNT_RO" ]; then
         echo "Cleanup Mount Directory"
         for PART in "${LOWER_PARTITION[@]}"; do
-            [ -d "$PART" ] && sudo umount -v "$PART"
+            sudo umount -v "$PART"
         done
         for PART in "${MERGED_PARTITION[@]}"; do
-            [ -d "$PART" ] && sudo umount -v "$PART"
+            sudo umount -v "$PART"
         done
         sudo rm -rf "${WORK_DIR:?}"
     else
@@ -178,7 +179,7 @@ mk_overlayfs() {
 }
 
 mk_erofs_umount() {
-    sudo mkfs.erofs -zlz4hc -T1230768000 --chunksize=4096 --exclude-regex="lost+found" "$2".erofs "$1" || abort "Failed to make erofs image from $1"
+    sudo "../bin/$HOST_ARCH/mkfs.erofs" -zlz4hc -T1230768000 --chunksize=4096 --exclude-regex="lost+found" "$2".erofs "$1" || abort "Failed to make erofs image from $1"
     sudo umount -v "$1"
     sudo rm -f "$2"
     sudo mv "$2".erofs "$2"
@@ -189,6 +190,14 @@ ro_ext4_img_to_rw() {
     e2fsck -fp -E unshare_blocks "$1" || return 1
     resize_img "$1" || return 1
     return 0
+}
+
+mount_erofs() {
+    if [ "$EROFS_USE_FUSE" ]; then
+        sudo "../bin/$HOST_ARCH/fuse.erofs" "$1" "$2" || return 1
+    else
+        sudo mount -v -t erofs -o ro,loop "$1" "$2" || return 1
+    fi
 }
 
 # workaround for Debian
@@ -466,11 +475,10 @@ if [[ "$WSA_MAIN_VER" -ge 2304 ]]; then
     sudo mkdir -p -m 755 "$ROOT_MNT_RO" || abort
     sudo chown "0:0" "$ROOT_MNT_RO" || abort
     sudo setfattr -n security.selinux -v "u:object_r:rootfs:s0" "$ROOT_MNT_RO" || abort
-    chmod +x ./fuse.erofs
-    sudo ./fuse.erofs "$WORK_DIR/wsa/$ARCH/system.img" "$ROOT_MNT_RO" || abort
-    sudo ./fuse.erofs "$WORK_DIR/wsa/$ARCH/vendor.img" "$VENDOR_MNT_RO" || abort
-    sudo ./fuse.erofs "$WORK_DIR/wsa/$ARCH/product.img" "$PRODUCT_MNT_RO" || abort
-    sudo ./fuse.erofs "$WORK_DIR/wsa/$ARCH/system_ext.img" "$SYSTEM_EXT_MNT_RO" || abort
+    mount_erofs "$WORK_DIR/wsa/$ARCH/system.img" "$ROOT_MNT_RO" || abort
+    mount_erofs "$WORK_DIR/wsa/$ARCH/vendor.img" "$VENDOR_MNT_RO" || abort
+    mount_erofs "$WORK_DIR/wsa/$ARCH/product.img" "$PRODUCT_MNT_RO" || abort
+    mount_erofs "$WORK_DIR/wsa/$ARCH/system_ext.img" "$SYSTEM_EXT_MNT_RO" || abort
     echo -e "done\n"
     echo "Create overlayfs for EROFS"
     mk_overlayfs "$ROOT_MNT_RO" system "$ROOT_MNT" || abort 
@@ -584,6 +592,7 @@ EOF
     echo "/debug_ramdisk(/.*)?    u:object_r:magisk_file:s0" | sudo tee -a "$VENDOR_MNT/etc/selinux/vendor_file_contexts"
     echo '/data/adb/magisk(/.*)?   u:object_r:magisk_file:s0' | sudo tee -a "$VENDOR_MNT/etc/selinux/vendor_file_contexts"
     sudo LD_LIBRARY_PATH="../linker/$HOST_ARCH" "$WORK_DIR/magisk/magiskpolicy" --load "$VENDOR_MNT/etc/selinux/precompiled_sepolicy" --save "$VENDOR_MNT/etc/selinux/precompiled_sepolicy" --magisk || abort
+    NEW_INITRC_DIR=$SYSTEM_MNT/etc/init/hw
     sudo tee -a "$SYSTEM_MNT/etc/init/hw/init.rc" <<EOF >/dev/null
 on post-fs-data
     mkdir /dev/debug_ramdisk_mirror
@@ -624,12 +633,17 @@ on nonencrypted
 on property:sys.boot_completed=1
     exec u:r:magisk:s0 0 0 --  /debug_ramdisk/magisk --boot-complete
 
-on property:init.svc.zygote=restarting
-    exec u:r:magisk:s0 0 0 -- /debug_ramdisk/magisk --zygote-restart
-
 on property:init.svc.zygote=stopped
     exec u:r:magisk:s0 0 0 -- /debug_ramdisk/magisk --zygote-restart
 EOF
+
+for i in "$NEW_INITRC_DIR"/*; do
+    if [[ "$i" =~ init.zygote.+\.rc ]]; then
+        echo "Inject zygote restart $i"
+        sudo awk -i inplace '{if($0 ~ /service zygote /){print $0;print "    exec u:r:magisk:s0 0 0 -- /debug_ramdisk/magisk --zygote-restart";a="";next}} 1' "$i"
+    fi
+done
+
     echo -e "Integrate Magisk done\n"
 elif [ "$ROOT_SOL" = "kernelsu" ]; then
     echo "Integrate KernelSU"
