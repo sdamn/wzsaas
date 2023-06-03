@@ -235,7 +235,7 @@ check_list "$COMPRESS_FORMAT" "Compress Format" "${COMPRESS_FORMAT_MAP[@]}"
 
 # shellcheck disable=SC1091
 [ -f "$PYTHON_VENV_DIR/bin/activate" ] && {
-    source "$PYTHON_VENV_DIR/bin/activate" || abort "Failed to activate virtual environment, please re-run install_deps.sh"
+    source "$PYTHON_VENV_DIR/bin/activate" || abort "Failed to activate virtual environment"
 }
 declare -A RELEASE_NAME_MAP=(["retail"]="Retail" ["RP"]="Release Preview" ["WIS"]="Insider Slow" ["WIF"]="Insider Fast")
 declare -A ANDROID_API_MAP=(["33"]="13.0")
@@ -351,7 +351,7 @@ if [ "$GAPPS_BRAND" != 'none' ]; then
     echo "Extract MindTheGapps"
     mkdir -p "$WORK_DIR/gapps" || abort
     if [ -f "$GAPPS_PATH" ]; then
-        if ! unzip "$GAPPS_PATH" "system/*" -x "system/addon.d/*" "system/system_ext/priv-app/SetupWizard/*" -d "$WORK_DIR/gapps"; then
+        if ! unzip "$GAPPS_PATH" "system/*" -x "system/addon.d/*" "system/product/app/*Exchange*/*" "system/product/etc/default-permissions/*mtg*" "system/product/etc/permissions/*dialer*" "system/product/etc/sysconfig/*build*" "system/product/framework/*" "system/product/lib*/*" "system/product/priv-app/AndroidAuto*/*" "system/system_ext/priv-app/SetupWizard/*" -d "$WORK_DIR/gapps"; then
             abort "Unzip MindTheGapps failed, package is corrupted?"
         fi
         mv "$WORK_DIR/gapps/system/"* "$WORK_DIR/gapps" || abort
@@ -388,6 +388,7 @@ echo -e "Create overlayfs for EROFS done\n"
 if [ "$REMOVE_AMAZON" ]; then
     echo "Remove Amazon Appstore"
     rm -f "$WORK_DIR/wsa/$ARCH/apex/mado_release.apex"
+    # Stub
     find "${PRODUCT_MNT:?}"/{apex,etc/*permissions} 2>/dev/null | grep -e mado | sudo xargs rm -rf
     echo -e "done\n"
 fi
@@ -432,17 +433,17 @@ on post-fs-data
     mount none none /dev/debug_ramdisk_mirror private
     mount tmpfs magisk /debug_ramdisk mode=0755
     copy /dev/debug_ramdisk_mirror/magisk64 /debug_ramdisk/magisk64
-    chmod 0711 /debug_ramdisk/magisk64
+    chmod 0755 /debug_ramdisk/magisk64
     symlink ./magisk64 /debug_ramdisk/magisk
     symlink ./magisk64 /debug_ramdisk/su
     symlink ./magisk64 /debug_ramdisk/resetprop
     start adbd
     copy /dev/debug_ramdisk_mirror/magisk32 /debug_ramdisk/magisk32
-    chmod 0711 /debug_ramdisk/magisk32
+    chmod 0755 /debug_ramdisk/magisk32
     copy /dev/debug_ramdisk_mirror/magiskinit /debug_ramdisk/magiskinit
-    chmod 0711 /debug_ramdisk/magiskinit
+    chmod 0755 /debug_ramdisk/magiskinit
     copy /dev/debug_ramdisk_mirror/magiskpolicy /debug_ramdisk/magiskpolicy
-    chmod 0711 /debug_ramdisk/magiskpolicy
+    chmod 0755 /debug_ramdisk/magiskpolicy
     mkdir /debug_ramdisk/.magisk
     mkdir /debug_ramdisk/.magisk/mirror 0
     mkdir /debug_ramdisk/.magisk/block 0
@@ -450,7 +451,7 @@ on post-fs-data
     copy /dev/debug_ramdisk_mirror/stub.apk /debug_ramdisk/stub.apk
     chmod 0644 /debug_ramdisk/stub.apk
     copy /dev/debug_ramdisk_mirror/loadpolicy.sh /debug_ramdisk/loadpolicy.sh
-    chmod 0711 /debug_ramdisk/loadpolicy.sh
+    chmod 0755 /debug_ramdisk/loadpolicy.sh
     umount /dev/debug_ramdisk_mirror
     rmdir /dev/debug_ramdisk_mirror
     exec u:r:magisk:s0 0 0 -- /system/bin/sh /debug_ramdisk/loadpolicy.sh
@@ -473,6 +474,7 @@ EOF
         if [[ "$i" =~ init.zygote.+\.rc ]]; then
             echo "Inject zygote restart $i"
             sudo awk -i inplace '{if($0 ~ /service zygote /){print $0;print "    exec u:r:magisk:s0 0 0 -- /debug_ramdisk/magisk --zygote-restart";a="";next}} 1' "$i"
+            sudo setfattr -n security.selinux -v "u:object_r:system_file:s0" "$i" || abort
         fi
     done
     echo -e "Integrate Magisk done\n"
@@ -543,20 +545,21 @@ if [ "$GAPPS_BRAND" != 'none' ]; then
         rm -rf "${SYSTEM_EXT_MNT:?}/priv-app/Provision"
     fi
     sudo cp --preserve=all -r "$WORK_DIR/gapps/product/"* "$PRODUCT_MNT" || abort
-
-    find "$WORK_DIR/gapps/product/overlay" -maxdepth 1 -mindepth 1 -printf '%P\n' | xargs -I placeholder sudo find "$PRODUCT_MNT/overlay/placeholder" -type f -exec setfattr -n security.selinux -v "u:object_r:vendor_overlay_file:s0" {} \; || abort
+    
+    find "$WORK_DIR/gapps/product/overlay" -maxdepth 1 -mindepth 1 -printf '%P\n' | xargs -I placeholder sudo find "$PRODUCT_MNT/overlay/placeholder" -type f -exec setfattr -n security.selinux -v "u:object_r:system_file:s0" {} \; || abort
     find "$WORK_DIR/gapps/product/etc/" -maxdepth 1 -mindepth 1 -printf '%P\n' | xargs -I placeholder sudo find "$PRODUCT_MNT/etc/placeholder" -type d -exec setfattr -n security.selinux -v "u:object_r:system_file:s0" {} \; || abort
     find "$WORK_DIR/gapps/product/etc/" -maxdepth 1 -mindepth 1 -printf '%P\n' | xargs -I placeholder sudo find "$PRODUCT_MNT/etc/placeholder" -type f -exec setfattr -n security.selinux -v "u:object_r:system_file:s0" {} \; || abort
+    #sudo setfattr -n security.selinux -v "u:object_r:system_file:s0" "$PRODUCT_MNT/framework" || abort
     find "$WORK_DIR/gapps/product/app/" -maxdepth 1 -mindepth 1 -printf '%P\n' | xargs -I placeholder sudo find "$PRODUCT_MNT/app/placeholder" -type d -exec setfattr -n security.selinux -v "u:object_r:system_file:s0" {} \; || abort
     find "$WORK_DIR/gapps/product/priv-app/" -maxdepth 1 -mindepth 1 -printf '%P\n' | xargs -I placeholder sudo find "$PRODUCT_MNT/priv-app/placeholder" -type d -exec setfattr -n security.selinux -v "u:object_r:system_file:s0" {} \; || abort
-    find "$WORK_DIR/gapps/product/framework/" -maxdepth 1 -mindepth 1 -printf '%P\n' | xargs -I placeholder sudo find "$PRODUCT_MNT/framework/placeholder" -type d -exec setfattr -n security.selinux -v "u:object_r:system_file:s0" {} \; || abort
+    #find "$WORK_DIR/gapps/product/framework/" -maxdepth 1 -mindepth 1 -printf '%P\n' | xargs -I placeholder sudo find "$PRODUCT_MNT/framework/placeholder" -type d -exec setfattr -n security.selinux -v "u:object_r:system_file:s0" {} \; || abort
     find "$WORK_DIR/gapps/product/app/" -maxdepth 1 -mindepth 1 -printf '%P\n' | xargs -I placeholder sudo find "$PRODUCT_MNT/app/placeholder" -type f -exec setfattr -n security.selinux -v "u:object_r:system_file:s0" {} \; || abort
     find "$WORK_DIR/gapps/product/priv-app/" -maxdepth 1 -mindepth 1 -printf '%P\n' | xargs -I placeholder sudo find "$PRODUCT_MNT/priv-app/placeholder" -type f -exec setfattr -n security.selinux -v "u:object_r:system_file:s0" {} \; || abort
-    find "$WORK_DIR/gapps/product/framework/" -maxdepth 1 -mindepth 1 -printf '%P\n' | xargs -I placeholder sudo find "$PRODUCT_MNT/framework/placeholder" -type f -exec setfattr -n security.selinux -v "u:object_r:system_file:s0" {} \; || abort
+    #find "$WORK_DIR/gapps/product/framework/" -maxdepth 1 -mindepth 1 -printf '%P\n' | xargs -I placeholder sudo find "$PRODUCT_MNT/framework/placeholder" -type f -exec setfattr -n security.selinux -v "u:object_r:system_file:s0" {} \; || abort
     find "$WORK_DIR/gapps/system_ext/etc/permissions/" -maxdepth 1 -mindepth 1 -printf '%P\n' | xargs -I placeholder sudo find "$SYSTEM_EXT_MNT/etc/permissions/placeholder" -type f -exec setfattr -n security.selinux -v "u:object_r:system_file:s0" {} \; || abort
-    sudo setfattr -n security.selinux -v "u:object_r:system_lib_file:s0" "$PRODUCT_MNT/lib" || abort
-    find "$WORK_DIR/gapps/product/lib/" -maxdepth 1 -mindepth 1 -printf '%P\n' | xargs -I placeholder sudo find "$PRODUCT_MNT/lib/placeholder" -exec setfattr -n security.selinux -v "u:object_r:system_lib_file:s0" {} \; || abort
-    find "$WORK_DIR/gapps/product/lib64/" -maxdepth 1 -mindepth 1 -printf '%P\n' | xargs -I placeholder sudo find "$PRODUCT_MNT/lib64/placeholder" -type f -exec setfattr -n security.selinux -v "u:object_r:system_lib_file:s0" {} \; || abort
+    #sudo setfattr -n security.selinux -v "u:object_r:system_lib_file:s0" "$PRODUCT_MNT/lib" || abort
+    #find "$WORK_DIR/gapps/product/lib/" -maxdepth 1 -mindepth 1 -printf '%P\n' | xargs -I placeholder sudo find "$PRODUCT_MNT/lib/placeholder" -exec setfattr -n security.selinux -v "u:object_r:system_lib_file:s0" {} \; || abort
+    #find "$WORK_DIR/gapps/product/lib64/" -maxdepth 1 -mindepth 1 -printf '%P\n' | xargs -I placeholder sudo find "$PRODUCT_MNT/lib64/placeholder" -type f -exec setfattr -n security.selinux -v "u:object_r:system_lib_file:s0" {} \; || abort
     find "$WORK_DIR/gapps/system_ext/priv-app/" -maxdepth 1 -mindepth 1 -printf '%P\n' | xargs -I placeholder sudo find "$SYSTEM_EXT_MNT/priv-app/placeholder" -type d -exec setfattr -n security.selinux -v "u:object_r:system_file:s0" {} \; || abort
     find "$WORK_DIR/gapps/system_ext/etc/" -maxdepth 1 -mindepth 1 -printf '%P\n' | xargs -I placeholder sudo find "$SYSTEM_EXT_MNT/etc/placeholder" -type d -exec setfattr -n security.selinux -v "u:object_r:system_file:s0" {} \; || abort
     find "$WORK_DIR/gapps/system_ext/priv-app/" -maxdepth 1 -mindepth 1 -printf '%P\n' | xargs -I placeholder sudo find "$SYSTEM_EXT_MNT/priv-app/placeholder" -type f -exec setfattr -n security.selinux -v "u:object_r:system_file:s0" {} \; || abort
@@ -658,6 +661,7 @@ elif [ "$COMPRESS_FORMAT" = "xz" ]; then
     fi
 elif [ "$COMPRESS_FORMAT" = "zip" ]; then
     echo "Compressing with zip later..."
+    echo "file_ext=.zip" >> "$GITHUB_OUTPUT"
     cp -r "$WORK_DIR/wsa/$artifact_name" "$OUTPUT_PATH" || abort
     touch "$OUTPUT_PATH/apex/.gitkeep" || abort
 fi
