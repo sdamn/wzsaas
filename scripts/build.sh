@@ -68,6 +68,7 @@ default() {
     RELEASE_TYPE=retail
     MAGISK_VER=stable
     GAPPS_BRAND=MindTheGapps
+    CUSTOM_MODEL=redfin
     ROOT_SOL=magisk
 }
 
@@ -158,6 +159,19 @@ GAPPS_BRAND_MAP=(
     "none"
 )
 
+CUSTOM_MODEL_MAP=(
+    "none"
+    "sunfish"
+    "bramble"
+    "redfin"
+    "barbet"
+    "raven"
+    "oriole"
+    "bluejay"
+    "panther"
+    "cheetah"
+)
+
 ROOT_SOL_MAP=(
     "magisk"
     "kernelsu"
@@ -175,6 +189,7 @@ ARGUMENT_LIST=(
     "release-type:"
     "magisk-ver:"
     "gapps-brand:"
+    "custom-model:"
     "root-sol:"
     "compress-format:"
     "remove-amazon"
@@ -197,6 +212,7 @@ while [[ $# -gt 0 ]]; do
         --arch              ) ARCH="$2"; shift 2 ;;
         --release-type      ) RELEASE_TYPE="$2"; shift 2 ;;
         --gapps-brand       ) GAPPS_BRAND="$2"; shift 2 ;;
+        --custom-model      ) CUSTOM_MODEL="$2"; shift 2;;
         --root-sol          ) ROOT_SOL="$2"; shift 2 ;;
         --compress-format   ) COMPRESS_FORMAT="$2"; shift 2 ;;
         --remove-amazon     ) REMOVE_AMAZON="yes"; shift ;;
@@ -230,6 +246,7 @@ check_list "$ARCH" "Architecture" "${ARCH_MAP[@]}"
 check_list "$RELEASE_TYPE" "Release Type" "${RELEASE_TYPE_MAP[@]}"
 check_list "$MAGISK_VER" "Magisk Version" "${MAGISK_VER_MAP[@]}"
 check_list "$GAPPS_BRAND" "GApps Brand" "${GAPPS_BRAND_MAP[@]}"
+check_list "$CUSTOM_MODEL" "Custom Model" "${CUSTOM_MODEL_MAP[@]}"
 check_list "$ROOT_SOL" "Root Solution" "${ROOT_SOL_MAP[@]}"
 check_list "$COMPRESS_FORMAT" "Compress Format" "${COMPRESS_FORMAT_MAP[@]}"
 
@@ -238,7 +255,6 @@ check_list "$COMPRESS_FORMAT" "Compress Format" "${COMPRESS_FORMAT_MAP[@]}"
     source "$PYTHON_VENV_DIR/bin/activate" || abort "Failed to activate virtual environment"
 }
 declare -A RELEASE_NAME_MAP=(["retail"]="Retail" ["RP"]="Release Preview" ["WIS"]="Insider Slow" ["WIF"]="Insider Fast")
-declare -A ANDROID_API_MAP=(["33"]="13.0")
 RELEASE_NAME=${RELEASE_NAME_MAP[$RELEASE_TYPE]} || abort
 
 echo -e "Build: RELEASE_TYPE=$RELEASE_NAME"
@@ -249,8 +265,7 @@ UWPVCLibs_PATH="$DOWNLOAD_DIR/Microsoft.VCLibs.140.00.UWPDesktop_$ARCH.appx"
 xaml_PATH="$DOWNLOAD_DIR/Microsoft.UI.Xaml.2.8_$ARCH.appx"
 MAGISK_ZIP=magisk-$MAGISK_VER.zip
 MAGISK_PATH=$DOWNLOAD_DIR/$MAGISK_ZIP
-ANDROID_API=33
-GAPPS_ZIP_NAME=MindTheGapps-$ARCH-${ANDROID_API_MAP[$ANDROID_API]}.zip
+GAPPS_ZIP_NAME=MindTheGapps-$ARCH-13.0.zip
 GAPPS_PATH=$DOWNLOAD_DIR/$GAPPS_ZIP_NAME
 
 update_ksu_zip_name() {
@@ -261,7 +276,7 @@ update_ksu_zip_name() {
     KERNELSU_INFO="$KERNELSU_PATH.info"
 }
 update_gapps_zip_name() {
-    GAPPS_ZIP_NAME=MindTheGapps-$ARCH-${ANDROID_API_MAP[$ANDROID_API]}.zip
+    GAPPS_ZIP_NAME=MindTheGapps-$ARCH-13.0.zip
     GAPPS_PATH=$DOWNLOAD_DIR/$GAPPS_ZIP_NAME
 }
 echo "Generate Download Links"
@@ -290,7 +305,7 @@ if [ "$ROOT_SOL" = "kernelsu" ]; then
 fi
 if [ "$GAPPS_BRAND" != "none" ]; then
     update_gapps_zip_name
-    python3 generateGappsLink.py "$ARCH" "$DOWNLOAD_DIR" "$DOWNLOAD_CONF_NAME" "$ANDROID_API" "$GAPPS_ZIP_NAME" || abort
+    python3 generateGappsLink.py "$ARCH" "$DOWNLOAD_DIR" "$DOWNLOAD_CONF_NAME" "$GAPPS_ZIP_NAME" || abort
 fi
 echo "Download Artifacts"
 if ! aria2c --no-conf --log-level=info --log="$DOWNLOAD_DIR/aria2_download.log" -x16 -s16 -j5 -c -R -m0 --async-dns=false --check-integrity=true --continue=true --allow-overwrite=true --conditional-get=true -d"$DOWNLOAD_DIR" -i"$DOWNLOAD_DIR/$DOWNLOAD_CONF_NAME"; then
@@ -379,7 +394,7 @@ sudo "../bin/$HOST_ARCH/fuse.erofs" "$WORK_DIR/wsa/$ARCH/product.img" "$PRODUCT_
 sudo "../bin/$HOST_ARCH/fuse.erofs" "$WORK_DIR/wsa/$ARCH/system_ext.img" "$SYSTEM_EXT_MNT_RO" || abort 1
 echo -e "done\n"
 echo "Create overlayfs for EROFS"
-mk_overlayfs system "$ROOT_MNT_RO" "$SYSTEM_MNT_RW" "$ROOT_MNT" || abort 
+mk_overlayfs system "$ROOT_MNT_RO" "$SYSTEM_MNT_RW" "$ROOT_MNT" || abort
 mk_overlayfs vendor "$VENDOR_MNT_RO" "$VENDOR_MNT_RW" "$VENDOR_MNT" || abort
 mk_overlayfs product "$PRODUCT_MNT_RO" "$PRODUCT_MNT_RW" "$PRODUCT_MNT" || abort
 mk_overlayfs system_ext "$SYSTEM_EXT_MNT_RO" "$SYSTEM_EXT_MNT_RW" "$SYSTEM_EXT_MNT" || abort
@@ -517,11 +532,13 @@ fi
 
 echo "Add extra packages"
 sudo cp -r "../common/system/"* "$SYSTEM_MNT" || abort
-find "../common/system/priv-app/" -maxdepth 1 -mindepth 1 -printf '%P\n' | xargs -I placeholder sudo rm -rf "$SYSTEM_MNT/priv-app/placeholder/oat"
-find "../common/system/priv-app/" -maxdepth 1 -mindepth 1 -printf '%P\n' | xargs -I placeholder sudo find "$SYSTEM_MNT/priv-app/placeholder" -type d -exec chmod 0755 {} \;
-find "../common/system/priv-app/" -maxdepth 1 -mindepth 1 -printf '%P\n' | xargs -I placeholder sudo find "$SYSTEM_MNT/priv-app/placeholder" -type f -exec chmod 0644 {} \;
-find "../common/system/priv-app/" -maxdepth 1 -mindepth 1 -printf '%P\n' | xargs -I placeholder sudo find "$SYSTEM_MNT/priv-app/placeholder" -exec chown root:root {} \;
-find "../common/system/priv-app/" -maxdepth 1 -mindepth 1 -printf '%P\n' | xargs -I placeholder sudo find "$SYSTEM_MNT/priv-app/placeholder" -exec setfattr -n security.selinux -v "u:object_r:system_file:s0" {} \; || abort
+if [[ -d "../common/system/priv-app/" ]]; then
+    find "../common/system/priv-app/" -maxdepth 1 -mindepth 1 -printf '%P\n' | xargs -I placeholder sudo rm -rf "$SYSTEM_MNT/priv-app/placeholder/oat"
+    find "../common/system/priv-app/" -maxdepth 1 -mindepth 1 -printf '%P\n' | xargs -I placeholder sudo find "$SYSTEM_MNT/priv-app/placeholder" -type d -exec chmod 0755 {} \;
+    find "../common/system/priv-app/" -maxdepth 1 -mindepth 1 -printf '%P\n' | xargs -I placeholder sudo find "$SYSTEM_MNT/priv-app/placeholder" -type f -exec chmod 0644 {} \;
+    find "../common/system/priv-app/" -maxdepth 1 -mindepth 1 -printf '%P\n' | xargs -I placeholder sudo find "$SYSTEM_MNT/priv-app/placeholder" -exec chown root:root {} \;
+    find "../common/system/priv-app/" -maxdepth 1 -mindepth 1 -printf '%P\n' | xargs -I placeholder sudo find "$SYSTEM_MNT/priv-app/placeholder" -exec setfattr -n security.selinux -v "u:object_r:system_file:s0" {} \; || abort
+fi
 echo -e "Add extra packages done\n"
 
 echo "Permissions management Netfree and Netspark security certificates"
@@ -545,7 +562,7 @@ if [ "$GAPPS_BRAND" != 'none' ]; then
         rm -rf "${SYSTEM_EXT_MNT:?}/priv-app/Provision"
     fi
     sudo cp --preserve=all -r "$WORK_DIR/gapps/product/"* "$PRODUCT_MNT" || abort
-    
+
     find "$WORK_DIR/gapps/product/overlay" -maxdepth 1 -mindepth 1 -printf '%P\n' | xargs -I placeholder sudo find "$PRODUCT_MNT/overlay/placeholder" -type f -exec setfattr -n security.selinux -v "u:object_r:system_file:s0" {} \; || abort
     find "$WORK_DIR/gapps/product/etc/" -maxdepth 1 -mindepth 1 -printf '%P\n' | xargs -I placeholder sudo find "$PRODUCT_MNT/etc/placeholder" -type d -exec setfattr -n security.selinux -v "u:object_r:system_file:s0" {} \; || abort
     find "$WORK_DIR/gapps/product/etc/" -maxdepth 1 -mindepth 1 -printf '%P\n' | xargs -I placeholder sudo find "$PRODUCT_MNT/etc/placeholder" -type f -exec setfattr -n security.selinux -v "u:object_r:system_file:s0" {} \; || abort
@@ -565,10 +582,29 @@ if [ "$GAPPS_BRAND" != 'none' ]; then
     find "$WORK_DIR/gapps/system_ext/priv-app/" -maxdepth 1 -mindepth 1 -printf '%P\n' | xargs -I placeholder sudo find "$SYSTEM_EXT_MNT/priv-app/placeholder" -type f -exec setfattr -n security.selinux -v "u:object_r:system_file:s0" {} \; || abort
     sudo LD_LIBRARY_PATH="../linker/$HOST_ARCH" "$WORK_DIR/magisk/magiskpolicy" --load "$VENDOR_MNT/etc/selinux/precompiled_sepolicy" --save "$VENDOR_MNT/etc/selinux/precompiled_sepolicy" "allow gmscore_app gmscore_app vsock_socket { create connect write read }" "allow gmscore_app device_config_runtime_native_boot_prop file read" "allow gmscore_app system_server_tmpfs dir search" "allow gmscore_app system_server_tmpfs file open" "allow gmscore_app system_server_tmpfs filesystem getattr" "allow gmscore_app gpu_device dir search" "allow gmscore_app media_rw_data_file filesystem getattr" || abort
     echo -e "Integrate MindTheGapps done\n"
-    echo "Fix system props"
-    sudo python3 fixGappsProp.py "$ROOT_MNT" || abort
-    echo -e "done\n"
 fi
+
+if [[ "$CUSTOM_MODEL" != "none" ]]; then
+    echo "Fix system props"
+    # The first argument is prop path, second is product name (redfin), third is device model (Pixel 5)
+    declare -A MODEL_NAME_MAP=(["sunfish"]="Pixel 4a" ["bramble"]="Pixel 4a (5G)" ["redfin"]="Pixel 5" ["barbet"]="Pixel 5a" ["raven"]="Pixel 6 Pro" ["oriole"]="Pixel 6" ["bluejay"]="Pixel 6a" ["panther"]="Pixel 7" ["cheetah"]="Pixel 7 Pro")
+    MODEL_NAME="${MODEL_NAME_MAP[$CUSTOM_MODEL]}"
+    sudo python3 fixGappsProp.py "$ROOT_MNT" "$CUSTOM_MODEL" "$MODEL_NAME" || abort
+    # shellcheck disable=SC2002
+    BUILD_ID=$(sudo cat "$SYSTEM_MNT/build.prop" | grep -e ro.build.id | cut -c 13-)
+    if [[ "${#BUILD_ID}" != "15" ]]; then
+        FIXED_BUILD_ID=$(echo "$BUILD_ID" | cut -c -15)
+        echo "Fixed Build ID: $FIXED_BUILD_ID"
+        # shellcheck disable=SC2086
+        sudo find $ROOT_MNT/{system,system_ext,product,vendor} -name "build.prop" -exec sed -i -e "s/$BUILD_ID/$FIXED_BUILD_ID/g" {} \;
+    fi
+    echo -e "done\n"
+    MODEL_NAME="${MODEL_NAME// /-}"
+else
+    MODEL_NAME="default"
+fi
+
+sudo find "$ROOT_MNT" -not -type l -exec touch -amt 200901010000.00 {} \;
 
 echo "Create EROFS images"
 mk_erofs_umount "$VENDOR_MNT" "$WORK_DIR/wsa/$ARCH/vendor.img" "$VENDOR_MNT_RW" || abort
@@ -635,9 +671,12 @@ fi
 if [ "$GAPPS_BRAND" = "none" ]; then
     name2="-NoGApps"
 else
-    name2=-MindTheGapps-${ANDROID_API_MAP[$ANDROID_API]}
+    name2=-MindTheGapps-13.0
 fi
-artifact_name=WSA_${WSA_VER}_${ARCH}_${WSA_REL}${name1}${name2}
+if [[ "$MODEL_NAME" != "default" ]]; then
+    name3="-as-$MODEL_NAME"
+fi
+artifact_name=WSA_${WSA_VER}_${ARCH}_${WSA_REL}${name1}${name2}${name3}
 if [ "$REMOVE_AMAZON" = "yes" ]; then
     artifact_name+="-RemovedAmazon"
 fi
